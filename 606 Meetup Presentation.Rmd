@@ -1,0 +1,50 @@
+---
+title: "DATA 606 Meetup Presentation - Problem 2.29"
+author: "Dan Smilowitz"
+date: "February 11, 2016"
+output: html_document
+---
+
+##Problem##
+```{r echo=FALSE}
+setwd='C:/Users/Dan/Dropbox/School/MSDA/DATA 606/'
+```
+![](OpenIntro_2-29.png)
+```{r load-data, echo=FALSE, message=FALSE, fig.height=1}
+require(ggplot2)
+chips <- data.frame(number = seq(1:10), color = c(rep('red', 5), rep('blue', 3), rep('orange', 2)))
+ggplot(chips, aes(x = number, y = 1)) + geom_point(size = 6, aes(col = color)) + theme_bw() + theme(legend.position = 'none') + scale_x_continuous("", breaks = NULL, lim = c(1,10)) + scale_y_continuous("", breaks = NULL) + scale_color_manual(values=c("blue", "orange", "red"))
+```
+
+###Part a###
+```{r part-a, echo=FALSE, fig.height=1}
+ggplot(chips[c(1:5,7:10), ], aes(x = number, y = 1)) + geom_point(size = 6, aes(col = color)) + theme_bw() + theme(legend.position = 'none') + scale_x_continuous("", breaks = NULL, lim = c(1,10)) + scale_y_continuous("", breaks = NULL) + scale_color_manual(values=c("blue", "orange", "red"))
+```
+  
+After the blue chip is drawn, there are 9 chips remaining in the bag.  Since one blue chip has already been drawn, there are 2 remaining blue chips.  Thus, the probability of the next trip drawn being blue is
+  
+$P(a) = \frac{2}{9} \approx 0.222$
+  
+###Part b###
+```{r part-b, echo=FALSE, fig.height=1}
+ggplot(chips[c(1:8,10), ], aes(x = number, y = 1)) + geom_point(size = 6, aes(col = color)) + theme_bw() + theme(legend.position = 'none') + scale_x_continuous("", breaks = NULL, lim = c(1,10)) + scale_y_continuous("", breaks = NULL) + scale_color_manual(values=c("blue", "orange", "red"))
+```
+  
+Again, after one chip is drawn, there are nine chips remaining.  In this case, no blue chip has been drawn, so the probability of the second chip being blue is
+  
+$P(b) = \frac{3}{9} \approx 0.333$
+  
+###Part c###
+Assuming that no chips have been previously drawn, the probability of drawing two chips is the product of the probabilities of drawing a blue chip on each of the two draws: $P(c) = P(c_1) \times P(c_2)$.
+  
+```{r part-c, echo=FALSE, fig.height=1}
+ggplot(chips, aes(x = number, y = 1)) + geom_point(size = 6, aes(col = color)) + theme_bw() + theme(legend.position = 'none') + scale_x_continuous("", breaks = NULL, lim = c(1,10)) + scale_y_continuous("", breaks = NULL) + scale_color_manual(values=c("blue", "orange", "red"))
+ggplot(chips[c(1:5,7:10), ], aes(x = number, y = 1)) + geom_point(size = 6, aes(col = color)) + theme_bw() + theme(legend.position = 'none') + scale_x_continuous("", breaks = NULL, lim = c(1,10)) + scale_y_continuous("", breaks = NULL) + scale_color_manual(values=c("blue", "orange", "red"))
+```
+  
+The probability of drawing a blue chip on the first draw is simply the number of blue chips ($3$) divided by the total number of chips ($10$).  The probability of drawing a blue chip on the second draw, if a blue chip is selected on the first draw, is shown in Part a of this question.  So the probability of drawing two blue chips in a row as the *first two* chips is
+  
+$P(c) = P(c_1) \times P(c_2) = \frac{3}{10} \times \frac{2}{9} \approx 0.067$
+
+###Part d###
+When drawing without replacement, the outcome of one draw affects the probability of subsequent draws, so the **draws are not independent**.

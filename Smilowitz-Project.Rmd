@@ -1,0 +1,358 @@
+---
+title: 'DATA 606 Project: Investigating Fuel Economy'
+author: "Dan Smilowitz"
+date: "April 20, 2016"
+output:
+  html_document:
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+---
+
+<!-- change heading font size to allow for section numbering -->
+<style type="text/css">
+  h1 { font-size: 28px; }
+  h2 { font-size: 22px; }
+  h3 { font-size: 18px; }
+</style>
+
+```{r setup, include=FALSE, cache=FALSE}
+library(knitr)
+# additional packages used throughout
+library(ggplot2)
+library(dplyr)
+
+## set global chunk options
+opts_chunk$set(fig.path='figure/manual-', cache.path='cache/manual-', fig.align='center', fig.show='hold', par=TRUE)
+
+## tune details of base graphics (http://yihui.name/knitr/hooks)
+knit_hooks$set(par=function(before, options, envir){
+if (before && options$fig.show!='none') par(mar=c(4,4,.2,.1),cex.lab=.95,cex.axis=.9,mgp=c(2,.7,0),tcl=-.3)
+})
+
+## additional chunk options
+opts_chunk$set(warning=FALSE, message=FALSE, comment=NA, fig.retina=1)
+```
+
+
+# Introduction
+In response to economic conditions and environmental concerns, fuel economy of cars has had varying levels of importance to consumers.  This project investigates changes in fuel economy and relationships between fuel economy and other car attributes.
+
+The following questions are investigated:
+
+* Has the fuel economy of vehicles changed from 1984 to 2015?
+
+* Is there a difference in fuel economy between engines with different cylinders?
+
+* What about vehicles requiring different fuel types (excluding hybrid or electric)?
+
+* Is there a relationship between gas prices and fuel economy?
+
+
+
+# Data
+
+## Fuel Economy
+Environmental Protection Agency data is collected from the U.S. Department of Energy's Fuel Economy Data [website](https://www.fueleconomy.gov/feg/download.shtml) and assembled in the `fueleconomy` R package.  The data is stored in the `vehicles` data set.  The cases in this data set represent model years of cars (makes and models) between 1984 and 2015 for which there exist at least ten years of data and complete data.  Further information about the dataset is available via the package [reference manual](https://cran.r-project.org/web/packages/fueleconomy/fueleconomy.pdf).
+
+The structure of the data set is displayed below:
+
+```{r vehicle-import, echo=FALSE}
+library(fueleconomy)
+str(vehicles)
+```
+
+This is an observational study, as the data only monitors the variables --- there is no assigning of any potential explanatory variables.  Because of this, causal conclusions are potentially treacherous, and the research focuses on identifying associations.
+
+
+## Gas Prices
+Gas price data is collected from the U.S. Energy Information Administration.  Data is downloaded from Table 9.4 of EIA's [Monthly Energy Review](https://www.eia.gov/beta/MER/index.cfm?tbl=T09.04) as an Excel file.  The years and prices for "All Grades of Gasoline, U.S. City Average Retail Price" are stored in a [csv](https://raw.githubusercontent.com/dsmilo/DATA606/master/gas_prices.csv) and loaded into the `gas` data frame.
+
+The structure of the gas data is displayed below:
+```{r gas-import, echo=FALSE}
+gas <- read.csv('gas_prices.csv')
+str(gas)
+```
+
+
+# Exploratory Data Analysis
+In order to analyze fuel economy, the city and highway fuel economies are combined into a single value.  Per [EPA Guidelines](https://www.fueleconomy.gov/feg/label/learn-more-gasoline-label.shtml#fuel-economy),
+
+> Combined fuel economy is a weighted average of City and Highway MPG values that is calculated by weighting the City value by 55% and the Highway value by 45%.
+
+The combined fuel economy for each case is calculated and stored in the variable `mpg`
+
+```{r combined-mpg}
+vehicles$mpg <- 0.55 * vehicles$cty + 0.45 * vehicles$hwy
+```
+
+## Response Variable
+The combined fuel economy, `mpg` is the response variable of interest in this investigation.  Brief summary statistics of this variable, as well as its distribution, are presented below.
+```{r mpg-summary, fig.height=2.5, echo=FALSE}
+summary(vehicles$mpg)
+
+ggplot(vehicles, aes(x = mpg, fill = ..count..)) + geom_histogram(binwidth = 2, alpha = 0.5, col = "black") + scale_y_continuous("", labels = NULL, breaks = NULL) + scale_x_continuous("", limits = c(0,130)) + scale_fill_gradient(low = "red", high = "green", guide = FALSE) + ggtitle("Distribution of Fuel Economy\n")
+
+ggplot(vehicles, aes(x = 1, y = mpg)) + geom_boxplot(alpha = 0.5) + scale_x_continuous("", labels = NULL, breaks = NULL) + scale_y_continuous("Fuel Economy (mpg)", limits = c(0,130)) + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + coord_flip()
+```
+
+The summary statistics and both charts indicate that the distribution of gas mileage is _very strongly_ right-skewed.  It appears that most values over roughly 35 miles per gallon are outliers from the population.  As these outliers strongly affect the distribution and may lead to violation of conditions necessary for inference, they are removed from the dataset:
+
+```{r remove-outliers}
+vehicles <- vehicles[!vehicles$mpg %in% boxplot.stats(vehicles$mpg)$out, ]
+```
+
+Summary statistics and distribution are again presented for the `mpg` with outliers removed.
+
+```{r mpg-summary-2, fig.height=2.5, echo=FALSE}
+summary(vehicles$mpg)
+
+ggplot(vehicles, aes(x = mpg, fill = ..count..)) + geom_histogram(binwidth = 1, alpha = 0.5, col = "black") + scale_y_continuous("", labels = NULL, breaks = NULL) + scale_x_continuous("", lim=c(5, 35)) + scale_fill_gradient(low = "red", high = "green", guide = FALSE) + ggtitle("Distribution of Fuel Economy\n")
+
+ggplot(vehicles, aes(x = 1, y = mpg)) + geom_boxplot(alpha = 0.5) + scale_x_continuous("", labels = NULL, breaks = NULL) + scale_y_continuous("Fuel Economy (mpg)", lim=c(5, 35)) + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + coord_flip()
+```
+
+The filtered data range from 7.8 miles per gallon to 31.7 miles per gallon and is centered just below 20 miles per gallon.  The distribution of the data is nearly normal, with a possible very slight right-skewness.
+
+## Explanatory Variables
+To view how fuel economy differs by explanatory variable, basic summary statistics (mean and standard deviation) are calculated, and the distributions of `mpg` visualized.
+
+
+### Year
+```{r summary-by-year}
+vehicles_year <- vehicles %>% filter(year == 1984 | year == 2015)
+
+vehicles_year %>%
+  group_by(year) %>%
+  summarise(n = n(), mean = mean(mpg), median = median(mpg), sd = sd(mpg))
+```
+
+```{r plot-by-year, echo=FALSE, fig.height=2.5}
+ggplot(vehicles_year, aes(y = mpg, x = as.factor(year), fill = as.factor(year))) + geom_boxplot(alpha = 0.5) + scale_x_discrete("", labels = NULL, breaks = NULL) + scale_y_continuous("", limits = c(5,35)) + guides(fill=guide_legend(title="Year")) + theme(legend.justification = c(0, 0.75), legend.position = c(0, 0.75), legend.background = element_rect(fill=NA), legend.title = element_text(face="bold"), legend.title.align = 0.5) + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + coord_flip() + ggtitle("Distribution of Fuel Economy by Year\n")
+
+ggplot(vehicles_year, aes(x = mpg, fill = as.factor(year))) + geom_density(alpha = 0.5) + scale_y_continuous("", labels = NULL, breaks = NULL) + scale_x_continuous("Fuel Economy (mpg)", limits = c(5,35)) + guides(fill=guide_legend(title="Year")) + theme(legend.justification = c(0, 0.75), legend.position = c(0, 0.75), legend.background = element_rect(fill=NA), legend.title = element_text(face="bold"), legend.title.align = 0.5)
+```
+
+The distribution for 1984 is centered slightly above 17 miles per gallon, with the distribution for 2015 centered slightly above 23 miles per gallon.  The two distributions appear to have similar variability, with a standard deviation between 4-5 mpg.  Both distributions appear somewhat bimodal, and the distribution of gas mileage in 1984 appears to be somewhat right skewed, however, the degree of this difference from normal distributions is not severe enough to caution against inference.
+
+### Number of Cylinders
+```{r summary-by-cylinder}
+vehicles_cyl <- vehicles %>% filter(!is.na(cyl))
+
+vehicles_cyl %>%
+  group_by(cyl) %>%
+  summarise(n = n(), mean = mean(mpg), median = median(mpg), sd = sd(mpg))
+```
+
+```{r plot-by-cylinder, echo=FALSE}
+ggplot(vehicles_cyl, aes(y = mpg, x = as.factor(cyl), fill = as.factor(cyl))) + geom_boxplot(alpha = 0.5) + scale_x_discrete("Cylinders") + scale_y_continuous("Fuel Economy (mpg)\n") +  theme(legend.position = 'none') + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + ggtitle("Distribution of Fuel Economy by Number of Engine Cylinders\n")
+```
+
+The plot shows rather different distributions by number of cylinders.  The highest mean is for engines with three cylinders; means decrease as the number of cylinders increases to 16.  The distributions appear largely normal, with varying levels of skewness and spread with different numbers of cylinders.  Generally, cylinder numbers with more observations have greater spread with less skew.
+
+
+### Fuel Type
+```{r summary-by-fuel}
+vehicles_fuel <- vehicles %>% filter(!grepl("Electricity|or|and", fuel))
+
+vehicles_fuel %>%
+  group_by(fuel) %>%
+  summarise(n = n(), mean = mean(mpg), median = median(mpg), sd = sd(mpg))
+```
+
+```{r plot-by-fuel, echo=FALSE}
+ggplot(vehicles_fuel, aes(y = mpg, x = as.factor(fuel), fill = as.factor(fuel))) + geom_boxplot(alpha = 0.5) + scale_x_discrete("Fuel Type") + scale_y_continuous("Fuel Economy (mpg)\n") + theme(legend.position = 'none') + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + ggtitle("Distribution of Fuel Economy by Fuel Type\n")
+```
+
+The different fuel types have distributions centered at different values, with the center of each distribution being located between roughly 15-20 miles per gallon.  The Premium and Regular fuel types have very wide ranges, with a number of potential outliers using Premium fuel.  The distributions for CNG and Diesel exhibit right-skewness, while the other three types of fuel appear to be roughly symmetrical.
+
+
+## Gas Prices
+Brief summary statistics, as well as a histogram and boxplot, of the retail price of gasoline from 1984-2015 are prepared.
+```{r gas-plots, echo=FALSE, fig.height=2.5}
+summary(gas$price)
+
+ggplot(gas, aes(x = price, fill = ..count..)) + geom_histogram(binwidth = 0.10, alpha = 0.5, col = "black") + scale_y_continuous("", labels = NULL, breaks = NULL) + scale_x_continuous("", lim = c(0, 4), label = c("$0.00", "$1.00", "$2.00", "$3.00", "$4.00")) + scale_fill_gradient(low = "red", high = "green", guide = FALSE) + ggtitle("Distribution of Gas Prices\n")
+
+ggplot(gas, aes(x = 1, y = price)) + geom_boxplot(alpha = 0.5) + scale_x_continuous("", labels = NULL, breaks = NULL) + scale_y_continuous("Gas Price ($ per Gallon)", lim = c(0, 4), label = c("$0.00", "$1.00", "$2.00", "$3.00", "$4.00")) + stat_summary(fun.y = mean, geom = "point", shape = 4, size = 2) + coord_flip()
+```
+
+From these plots, the distribution of annual average gas prices appears to be right-skewed -- there are a number of instances between $1.10 - $1.30 per gallon, with most other bins showing far lower counts.  Most occurrences not in the two most populated bins occur at higher values, ranging has high as $3.70.
+
+```{r gas-price-year, echo=FALSE}
+ggplot(gas, aes(x = year, y = price)) + geom_line() + stat_smooth(se = FALSE) + scale_y_continuous("Gas Price ($ per gallon)\n", label = c("$0.00", "$1.00", "$2.00", "$3.00", "$4.00"), lim = c(0, 4)) + scale_x_continuous(label = seq(1984, 2016, 8), breaks = seq(1984, 2016, 8), lim = c(1984, 2016)) + ggtitle("Gas Prices from 1984-2015\n")
+```
+
+After fluctuating between roughly $1.00 and $1.25 per gallon from 1984-2002, gas prices grew rapidly through 2008 to slightly less than $3.50 per gallon, and have since fluctuated between roughly $2.50 and $3.75 per gallon.
+
+# Inference
+Statistical inference is performed in an attempt to answer the four questions posed in the [introduction](#introduction):
+
+* Has the fuel economy of vehicles changed from 1984 to 2015?
+
+* Is there a difference in fuel economy between engines with different cylinders?
+
+* What about vehicles requiring different fuel types (excluding hybrid or electric)?
+
+* Is there a relationship between gas prices and fuel economy?
+
+
+## Change between Years
+To test if there is a difference between fuel economies in 1984 and 2015, a t-test is performed.
+
+For this test, the hypotheses are
+
+* $H_0: \mu_{1984} = \mu_{2015}$ (there is no difference in average fuel economies)
+
+* $H_a: \mu_{1984} \neq \mu_{2015}$ (there is a difference in average fuel economies)
+
+### Conditions for Inference
+The data are not sampled, but there are no reasons why independence will not hold for the observations in this data set.  As observed in section [3.1](#response-variable), the data are not significantly skewed -- since the data represent a significant portion of the population, it can be deduced that the population is not significantly skewed.  Because the conditions are met, the t-test is performed.
+
+### Findings
+Using the statistics from section [3.2.1](#year), the test point estimate for the difference in yearly averages is the difference in the sample means:
+
+$$\bar{x}_{diff} = \bar{x}_{2015} - \bar{x}_{1984} = 23.45281 - 17.15944 = `r 23.45281 - 17.15944`$$
+
+The standard error is given by
+
+$$SE_{diff} = \sqrt{\frac{s_{1984}^2}{n_{1984}} + \frac{s_{2015}^2}{n_{2015}}} = \sqrt{\frac{(4.182516)^2}{784} + \frac{(4.512880)^2}{196}} = `r round(sqrt(4.182516^2 / 784 + 4.512880^2 / 196), 4)`$$
+
+The $T$ score associated with this test statistic is
+
+$$T = \frac{\bar{x}_{diff} - \mu_0}{SE_{diff}} = \frac{6.293 - 0}{0.3553} = `r round(6.293 / 0.3553, 3)`$$
+
+With $n - 1 = 195$ degrees of freedom, the p-value is given by
+```{r vehicles-year}
+2 * (1 - pt(17.712, df = 195))
+```
+
+Due to the extremely small p-value, the null hypothesis is rejected --- **there is significant statistical evidence that fuel economy was different for cars in 1984 and 2015.**
+
+
+## Difference between Cylinders
+To test for difference in the means between groups with different number of engine cylinders, an ANOVA test is performed.
+
+For this test, the hypotheses are
+
+* $H_0: \mu_2 = \mu_3 = \mu_4 = \mu_5 = \mu_6 = \mu_8 = \mu_{10} = \mu_{12} = \mu_{16}$ (all means are the same)
+
+* $H_a: \mu_2 \neq \mu_3 \neq \mu_4 \neq \mu_5 \neq \mu_6 \neq \mu_8 \neq \mu_{10} \neq \mu_{12} \neq \mu_{16}$ (at least some of the means are different)
+
+
+### Conditions for Inference
+As outlined in section [4.1.1](#conditions-for-inference), the conditions for independence and approximate normality are met.  The summary by fuel type in section [3.2.2](#number-of-cylinders) shows that the variance between groups is approximately equal.  All conditions are met, so the ANOVA test is performed.
+
+
+### Findings
+To perform the ANOVA test, a linear regression is performed, and an ANOVA table is created using the `anova` function
+
+```{r anova-cyl}
+fit_cyl <- lm(mpg ~ as.factor(cyl), data = vehicles_cyl)
+anova(fit_cyl)
+```
+
+Due to the extremely low p-value returned, the null hypothesis is rejected --- **there is statistically significant evidence that the fuel economy of vehicles is different for engines with different numbers of cylinders.**
+
+
+## Difference between Fuel Types
+To test for difference in the means between groups with different fuel types, an ANOVA test is performed.
+
+For this test, the hypotheses are
+
+* $H_0: \mu_{CNG} = \mu_{Diesel} = \mu_{Midgrade} = \mu_{Premium} = \mu_{Regular}$ (all means are the same)
+
+* $H_a: \mu_{CNG} \neq \mu_{Diesel} \neq \mu_{Midgrade} \neq \mu_{Premium} \neq \mu_{Regular}$ (at least some of the means are different)
+
+
+### Conditions for Inference
+As outlined in section [4.1.1](#conditions-for-inference), the conditions for independence and approximate normality are met.  The summary by fuel type in section [3.2.3](#fuel-type) shows that the variance between groups is approximately equal.  All conditions are met, so the ANOVA test is performed.
+
+
+### Findings
+To perform the ANOVA test, a linear regression is performed, and an ANOVA table is created using the `anova` function
+
+```{r anova-fuel}
+fit_fuel <- lm(mpg ~ fuel, data = vehicles_fuel)
+anova(fit_fuel)
+```
+
+Due to the extremely low p-value returned, the null hypothesis is rejected --- **there is statistically significant evidence that the fuel economy of vehicles is different for cars using different fuel types.**
+
+## Relationship with Gas Price
+To investigate the relationship between fuel economy and gas prices, a linear regression will be performed.  In order to prepare for this analysis, a data frame is constructed matching the cases of the `vehicles` data set with the gas prices in the `gas` data set.
+
+```{r vehicle-price}
+vehicles <- inner_join(vehicles, gas, by = "year")
+```
+
+To explore the relationship, a scatterplot of the two variables is created, with a jitter on the price, since there is only one value for each year.
+
+```{r mpg-price-plot, echo=FALSE}
+ggplot(vehicles, aes(x = jitter(price, amount = 0.1), y = mpg, col = year)) + geom_point(alpha = 0.5) + scale_x_continuous("Gas Price ($ per Gallon)", labels = scales::dollar) + scale_y_continuous("Fuel Economy (mpg)\n") + ggtitle("Fuel Economy vs. Gas Price\n")
+```
+
+No relationship is immediately visible from the scatterplot, although it can be observed that most of the very high fuel economy values occur in years with high gas prices.
+
+A linear regression is conducted and the fit summarized:
+
+```{r fit-gas}
+fit_gas <- lm(mpg ~ price, vehicles)
+```
+
+
+### Conditions for Inference
+To investigate that the conditions for linear regression, diagnostic plots are created:
+
+```{r fit-gas-conditions, echo=FALSE, fig.height=7/3}
+par(mfrow = c(1, 3))
+plot(fit_gas$residuals, main = NULL)
+hist(fit_gas$residuals, main = NULL)
+qqnorm(fit_gas$residuals, main = NULL)
+qqline(fit_gas$residuals)
+par(mfrow = c(1, 1))
+```
+
+There does not appear to be any pattern in the residuals in the scatterplot, so the condition of linearity can be accepted.  The histogram indicates that the residuals are normally distributed.  Finally, the scatterplot and Q-Q plot indicate that the residuals indicate near-constant variability.  Because the conditions are met, linear regression is continued.
+
+
+### Findings
+The linear model fitting fuel economy and gas price is summarized:
+```{r fit-summary}
+summary(fit_gas)
+```
+
+The equation returned by the linear regression is
+$$\widehat{mpg} = 18.304 + 0.758 \times price$$
+
+The p-values associated with the coefficients of the linear regression are very small, indicating that they have statistical significance.  However, the $R^2$ value associated with the regression is quite low -- less than 3% of variation in fuel economy can be explained by variation in gas prices.
+
+The regression line is plotted over the scatterplot from above:
+```{r scatter-line, echo=FALSE}
+ggplot(vehicles, aes(x = jitter(price, amount = 0.1), y = mpg, col = year)) + geom_point(alpha = 0.5, show.legend = FALSE) + geom_abline(intercept = fit_gas$coefficients[1], slope = fit_gas$coefficients[2], size = 1.5, col = "red", linetype = 5, alpha = 0.75) + scale_x_continuous("Gas Price ($ per Gallon)", labels = scales::dollar) + scale_y_continuous("Fuel Economy (mpg)\n") + ggtitle("Fuel Economy vs. Gas Price\n")
+```
+
+
+# Conclusion
+Investigating the EPA fuel economy data collected in the `fueleconomy` package, outliers in the combined gas mileage were identified.  With these outliers removed, the distribution of fuel economy was found to be nearly normal.  Using this modified data set, the following findings were reached, with strong statistical significance:
+
+* Fuel economy was different for cars in 1984 than it was in 2015
+
+* Fuel economy of vehicles is different for engines with different numbers of cylinders
+
+* Fuel economy of vehicles is different for cars using different fuel types
+
+While not investigated as part of this project, the data investigated provides a number of different variables that could be used for further analysis.  Difference in fuel economy based on other categorical variables (i.e. make, vehicle class, transmission, drive) could be investigated through appropriate hypothesis testing.  Multiple regression could be performed to attempt to predict the gas mileage of a vehicle based upon its characteristics.  
+
+Additionally, a linear regression was performed comparing combined fuel economy to average gas prices.  While the regression line produced ($\widehat{mpg} = 18.304 + 0.758 \times price$) has statistically significant coefficients, it only explains a small percent of the variation in fuel economy.  This suggests that there are other variables affecting fuel economy -- the completion of a multiple regression including more variables from this data set may be able to explain a higher percentage of the variation in fuel economy.  The creation of such a model may be useful for someone seeking to predict the fuel economy (and associated fuel costs) for a vehicle with known attributes that has not yet undergone EPA testing for fuel economy.
+
+
+# References {-}
+U.S. Department of Energy Office of Energy Efficiency and Renewable Energy (2016). _Download Fuel Economy Data._ http://www.fueleconomy.gov/feg/download.shtml
+
+U.S. Department of Energy Office of Energy Efficiency and Renewable Energy (2016). _Gasoline Vehicles:
+Learn More About the New Label._ https://www.fueleconomy.gov/feg/label/learn-more-gasoline-label.shtml#fuel-economy
+
+U.S. Energy Information Administration (2016). _Monthly Energy Review Table 9.4: Retail Motor Gasoline and Motor Gasoline and On-Highway Diesel Fuel Prices._ https://www.eia.gov/beta/MER/index.cfm?tbl=T09.04
+
+Wickham, Hadley (2014). _fueleconomy: EPA fuel economy data. R package version 0.1._ https://CRAN.R-project.org/package=fueleconomy
